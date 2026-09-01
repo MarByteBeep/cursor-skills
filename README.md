@@ -8,8 +8,9 @@ Cursor agent skills, installable via the [skills CLI](https://github.com/vercel-
 # List available skills
 npx skills add MarByteBeep/cursor-skills --list
 
-# Project scope
-npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor
+# Project scope (finalize: chain postinstall after add)
+npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor --copy -y && \
+  node .agents/skills/finalize/scripts/postinstall.mjs
 npx skills add MarByteBeep/cursor-skills --skill changelog -a cursor
 
 # Global (all projects)
@@ -29,4 +30,4 @@ Use `--copy` if Cursor does not pick up symlinked skills.
 | `finalize` | Quality loop: Supabase types → format → CI → Fallow until green (uses caveman mode) |
 | `changelog` | Update `CHANGELOG.md` and `package.json` version from user-facing changes |
 
-`finalize` installs the **caveman** skill in the project when you run init (or install it yourself with project scope).
+`finalize` needs a one-time **postinstall** after add (`postinstall.mjs`); it may install the **caveman** skill in the project.

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * finalize init — one-time project setup for the finalize skill.
+ * finalize postinstall — one-time project setup after `npx skills add … --skill finalize`.
  *
  * Usage:
- *   node init.mjs [repo-root] [options]
+ *   npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor --copy -y && node postinstall.mjs
+ *   node postinstall.mjs [repo-root] [options]
  *
  * Options:
  *   --supabase       Include bootstrap (gen types → src/integrations/supabase/types.ts)
@@ -15,7 +16,14 @@
  *   -h, --help
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -23,20 +31,21 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const TEMPLATE_DIR = join(__dirname, "..", "templates");
-const PIPELINE_PATH = ".cursor/finalize-pipeline.json";
+const PIPELINE_PATH = ".agents/skills/finalize/pipeline.json";
 /** Vite/React + Supabase template default (repo-relative). */
 const DEFAULT_SUPABASE_TYPES_REL = "src/integrations/supabase/types.ts";
 const DEV_DEPS = {
-	"@biomejs/biome": "^2.0.0",
-	fallow: "^3.5.1",
+	"@biomejs/biome": "latest",
+	fallow: "latest",
 };
 const CAVEMAN_SKILL = "JuliusBrussee/caveman";
 
 function printHelp() {
-	console.log(`finalize init — set up finalize for this repo (run once per project)
+	console.log(`finalize postinstall — set up finalize for this repo (run once after skills add)
 
 Usage:
-  node init.mjs [repo-root] [options]
+  npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor --copy -y && node postinstall.mjs
+  node postinstall.mjs [repo-root] [options]
 
 Options:
   --supabase       Include Supabase types bootstrap (writes src/integrations/supabase/types.ts)
@@ -47,7 +56,7 @@ Options:
   --dry-run        Show plan only
   -h, --help
 
-After init, /finalize reads ${PIPELINE_PATH} — no detect per run.
+After postinstall, /finalize reads ${PIPELINE_PATH} — no detect per run.
 `);
 }
 
@@ -77,7 +86,7 @@ function parseArgs(argv) {
 }
 
 function die(msg) {
-	console.error(`finalize init: ${msg}`);
+	console.error(`finalize postinstall: ${msg}`);
 	process.exit(1);
 }
 
@@ -365,7 +374,7 @@ function buildPipeline(runner, includeSupabase, scripts, supabaseTypesRel, commu
 		generatedAt: new Date().toISOString(),
 		packageManager: runner.name,
 		scriptsRunner: runner.name === "bun" ? "bunx" : "npx",
-		initInvoker: runner.name === "bun" ? "bun" : "node",
+		postinstallInvoker: runner.name === "bun" ? "bun" : "node",
 		communication,
 		bootstrap,
 		loop,
@@ -385,6 +394,25 @@ function writePipeline(root, pipeline, dryRun) {
 	console.log(`  wrote: ${fullPath}`);
 }
 
+/** Remove init-only assets from the installed skill copy (scripts + templates). */
+function selfDestructSkillAssets(dryRun) {
+	const skillDir = join(__dirname, "..");
+	const normalized = skillDir.replace(/\\/g, "/");
+	if (!normalized.endsWith(".agents/skills/finalize")) {
+		return;
+	}
+	for (const name of ["scripts", "templates"]) {
+		const path = join(skillDir, name);
+		if (!existsSync(path)) continue;
+		if (dryRun) {
+			console.log(`  would remove: ${path}`);
+			continue;
+		}
+		rmSync(path, { recursive: true, force: true });
+		console.log(`  removed: ${path}`);
+	}
+}
+
 async function main() {
 	const opts = parseArgs(process.argv.slice(2));
 	if (opts.help) {
@@ -395,7 +423,7 @@ async function main() {
 	const root = opts.target;
 	process.chdir(root);
 
-	console.log("finalize init\n");
+	console.log("finalize postinstall\n");
 	console.log(`  repo: ${root}`);
 
 	const runner = detectRunner();
@@ -455,7 +483,7 @@ async function main() {
 				console.log(
 					"  supabase/config.toml not found — Supabase bootstrap skipped.",
 				);
-				console.log("  Re-run init with --supabase to force it.\n");
+				console.log("  Re-run postinstall with --supabase to force it.\n");
 				includeSupabase = false;
 			}
 		}
@@ -578,12 +606,15 @@ async function main() {
 		const ok = installCavemanSkill(runner, opts.dryRun);
 		if (!ok && !opts.dryRun) {
 			console.warn(
-				"  caveman install failed — install manually or re-run init with --no-caveman for brief mode",
+				"  caveman install failed — install manually or re-run postinstall with --no-caveman for brief mode",
 			);
 		}
 	}
 
-	console.log("\nDone. Run /finalize in Cursor (after installing the finalize skill globally).\n");
+	console.log("");
+	selfDestructSkillAssets(opts.dryRun);
+
+	console.log("\nDone. Run /finalize in Cursor.\n");
 }
 
 main().catch((err) => {

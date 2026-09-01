@@ -1,7 +1,7 @@
 ---
 name: finalize
 description: >
-  Continuous quality fix loop. Reads .cursor/finalize-pipeline.json (from finalize init).
+  Continuous quality fix loop. Reads .agents/skills/finalize/pipeline.json (from finalize postinstall).
   Runs the configured bootstrap once, then repeatedly executes all configured loop[] phases
   according to their loop semantics until the pipeline is green. Communication style follows
   pipeline.communication (caveman or brief). Use only when the user invokes /finalize.
@@ -9,14 +9,14 @@ description: >
 
 # Finalize: continuous quality fix loop
 
-Ensure the codebase passes all checks defined in **`.cursor/finalize-pipeline.json`**.
+Ensure the codebase passes all checks defined in **`.agents/skills/finalize/pipeline.json`**.
 
 The skill is **complete only when every loop command in the pipeline passes consecutively with exit code 0**.
 
 ## Load and validate pipeline (start of every /finalize)
 
-1. Read **`.cursor/finalize-pipeline.json`** at repo root.
-2. If missing → stop. Tell the user to run `.agents/skills/finalize/scripts/init.mjs` once (see [README](README.md)).
+1. Read **`.agents/skills/finalize/pipeline.json`** at repo root.
+2. If missing → stop. Tell the user to install the finalize skill and run postinstall once (see [README](README.md)).
 3. Parse JSON. If invalid → stop and report the parse error.
 4. Validate before running anything:
 
@@ -73,7 +73,7 @@ To diagnose failures and apply fixes, use normal agent tooling: read files, sear
 
 ## Communication
 
-Read **`pipeline.communication`** from `.cursor/finalize-pipeline.json`:
+Read **`pipeline.communication`** from `.agents/skills/finalize/pipeline.json`:
 
 ### `"caveman"`
 
@@ -101,7 +101,7 @@ Example done line: `All configured checks pass.`
 
 ## What the Fallow phase gates
 
-Init always configures the Fallow loop entry as (all three fields required together):
+Postinstall always configures the Fallow loop entry as (all three fields required together):
 
 | Field | Value |
 |-------|-------|
