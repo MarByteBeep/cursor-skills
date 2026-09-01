@@ -7,12 +7,13 @@
  *   node postinstall.mjs [repo-root] [options]
  *
  * Options:
- *   --supabase       Include bootstrap (gen types → src/integrations/supabase/types.ts)
- *   --no-supabase    Skip bootstrap step
+ *   --supabase       Include Supabase type generation in finalize preflight
+ *   --no-supabase    Omit Supabase type generation from finalize preflight
  *   --caveman        Install caveman skill in this project; pipeline communication: caveman
  *   --no-caveman     Skip caveman install; pipeline communication: brief
  *   -y, --yes        Non-interactive (defaults: supabase if config.toml exists; caveman on)
- *   --dry-run        Print actions without writing or installing
+ *   --force          Re-run even if pipeline.json exists (requires skill reinstall for templates)
+ *   --dry-run        Print plan; no file writes or package installs
  *   -h, --help
  */
 import { spawnSync } from "node:child_process";
@@ -48,12 +49,13 @@ Usage:
   node postinstall.mjs [repo-root] [options]
 
 Options:
-  --supabase       Include Supabase types bootstrap (writes src/integrations/supabase/types.ts)
-  --no-supabase    Skip Supabase bootstrap
+  --supabase       Include Supabase type generation in finalize preflight
+  --no-supabase    Omit Supabase type generation from finalize preflight
   --caveman        Install caveman skill in this project (communication: caveman)
   --no-caveman     Skip caveman; communication: brief
   -y, --yes        Skip prompts (supabase: on if supabase/config.toml exists; caveman: on)
-  --dry-run        Show plan only
+  --force          Re-run even if ${PIPELINE_PATH} exists (reinstall skill first — templates are removed after init)
+  --dry-run        Print plan; no file writes or package installs
   -h, --help
 
 After postinstall, /finalize reads ${PIPELINE_PATH} — no detect per run.
@@ -61,12 +63,13 @@ After postinstall, /finalize reads ${PIPELINE_PATH} — no detect per run.
 }
 
 function parseArgs(argv) {
-	/** @type {{ target: string, supabase: boolean | null, caveman: boolean | null, yes: boolean, dryRun: boolean, help: boolean }} */
+	/** @type {{ target: string, supabase: boolean | null, caveman: boolean | null, yes: boolean, force: boolean, dryRun: boolean, help: boolean }} */
 	const opts = {
 		target: process.cwd(),
 		supabase: null,
 		caveman: null,
 		yes: false,
+		force: false,
 		dryRun: false,
 		help: false,
 	};
@@ -77,6 +80,7 @@ function parseArgs(argv) {
 		else if (a === "--caveman") opts.caveman = true;
 		else if (a === "--no-caveman") opts.caveman = false;
 		else if (a === "-y" || a === "--yes") opts.yes = true;
+		else if (a === "--force") opts.force = true;
 		else if (a === "--dry-run") opts.dryRun = true;
 		else if (a === "-h" || a === "--help") opts.help = true;
 		else if (!a.startsWith("-")) opts.target = resolve(a);
@@ -85,6 +89,7 @@ function parseArgs(argv) {
 	return opts;
 }
 
+/** @returns {never} */
 function die(msg) {
 	console.error(`finalize postinstall: ${msg}`);
 	process.exit(1);
@@ -94,11 +99,13 @@ function isTTY() {
 	return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function detectRunner() {
-	if (commandExists("bun")) {
+const FINALIZE_LOOP = ["format", "check:ci", "check:fallow"];
+
+function makeRunner(name) {
+	if (name === "bun") {
 		return {
 			name: "bun",
-			run: (script) => `bun ${script}`,
+			run: (script) => `bun run ${script}`,
 			exec: (script) => `bunx ${script}`,
 			addDevDeps: (deps) => ["add", "-d", ...deps],
 			addCmd: "bun",
@@ -111,6 +118,32 @@ function detectRunner() {
 		addDevDeps: (deps) => ["install", "-D", ...deps],
 		addCmd: "npm",
 	};
+}
+
+/** Prefer project lockfile / packageManager, then PATH. */
+function detectRunner(root, pkg) {
+	if (pkg.packageManager !== undefined && typeof pkg.packageManager !== "string") {
+		die("package.json packageManager must be a string");
+	}
+	if (pkg.packageManager) {
+		const declared = pkg.packageManager.split("@")[0];
+		if (declared !== "bun" && declared !== "npm") {
+			die(`unsupported package manager "${declared}" — finalize supports bun and npm`);
+		}
+		if (!commandExists(declared)) die(`${declared} required by package.json but not on PATH`);
+		return makeRunner(declared);
+	}
+	if (existsSync(join(root, "bun.lock")) || existsSync(join(root, "bun.lockb"))) {
+		if (!commandExists("bun")) die("bun.lock present but bun not on PATH");
+		return makeRunner("bun");
+	}
+	if (existsSync(join(root, "package-lock.json"))) {
+		if (!commandExists("npm")) die("package-lock.json present but npm not on PATH");
+		return makeRunner("npm");
+	}
+	if (commandExists("bun")) return makeRunner("bun");
+	if (commandExists("npm")) return makeRunner("npm");
+	die("need bun or npm on PATH");
 }
 
 function commandExists(cmd) {
@@ -141,19 +174,39 @@ function hasDep(pkg, name) {
 	return Object.hasOwn(deps, name);
 }
 
-function defaultScripts(runner) {
+function defaultScripts(runner, includeSupabase, supabaseTypesRel) {
 	const x = runner.name === "bun" ? "bunx" : "npx";
 	const testCmd = runner.name === "bun" ? "bun test" : "npm test";
-	return {
+	/** @type {Record<string, string>} */
+	const scripts = {
 		format: `${x} @biomejs/biome check --write`,
 		"check:ci": `${x} @biomejs/biome ci --error-on-warnings && ${x} tsc -b --noEmit && ${testCmd} && rm -f *.tsbuildinfo && echo 'no errors. done'`,
 		"check:fallow": `${x} fallow --quiet --format json && ${x} fallow --quiet --fail-on-issues`,
 	};
+	// Keep this as a package script so developers can run it manually:
+	//   bun run supabase:types
+	// When Supabase is enabled, finalize also runs it automatically via preflight.
+	if (includeSupabase) {
+		scripts["supabase:types"] = supabaseTypesScript(supabaseTypesRel);
+	}
+	return scripts;
 }
 
-function missingScripts(pkg, names) {
+
+/** Scripts that exist but differ from finalize defaults. */
+function scriptConflicts(pkg, scriptDefaults) {
 	const scripts = pkg.scripts ?? {};
-	return names.filter((name) => !(name in scripts));
+	return Object.keys(scriptDefaults).filter(
+		(name) => name in scripts && scripts[name] !== scriptDefaults[name],
+	);
+}
+
+/** Scripts missing or mismatched — finalize owns these names. */
+function scriptsNeedingWrite(pkg, scriptDefaults) {
+	const scripts = pkg.scripts ?? {};
+	return Object.keys(scriptDefaults).filter(
+		(name) => !(name in scripts) || scripts[name] !== scriptDefaults[name],
+	);
 }
 
 function missingDevDeps(pkg) {
@@ -246,8 +299,8 @@ function detectSupabaseTypesRelPath(root) {
 	return defaultRel;
 }
 
-function supabaseBootstrapCommand(typesRelPath) {
-	return `supabase gen types typescript --local --schema public > ${typesRelPath}`;
+function supabaseTypesScript(typesRelPath) {
+	return `supabase gen types typescript --local --schema public > ${shellEscape(typesRelPath)}`;
 }
 
 function ensureSupabaseTypesDir(root, typesRelPath, dryRun) {
@@ -305,19 +358,77 @@ function prepareFallowrc(root) {
 	return `${JSON.stringify(template, null, "\t")}\n`;
 }
 
+const FALLOW_RULE_REL = ".cursor/rules/fallow.mdc";
+
+/** @type {Record<string, string>} template filename → repo-relative dest */
+const CONFIG_TEMPLATE_DEST = {
+	"biome.json": "biome.json",
+	".fallowrc.json": ".fallowrc.json",
+	"fallow.mdc": FALLOW_RULE_REL,
+};
+
 /** @returns {string[]} */
 function missingConfigTemplates(root) {
 	/** @type {string[]} */
 	const missing = [];
-	if (!pathExists(root, "biome.json")) missing.push("biome.json");
-	if (!pathExists(root, ".fallowrc.json")) missing.push(".fallowrc.json");
+	for (const [template, dest] of Object.entries(CONFIG_TEMPLATE_DEST)) {
+		if (!pathExists(root, dest)) missing.push(template);
+	}
 	return missing;
+}
+
+function normalizeJson(raw) {
+	return JSON.stringify(JSON.parse(raw));
+}
+
+/** Compare fallowrc bodies — entry is project-specific and excluded. */
+function fallowrcBody(raw) {
+	const { entry: _entry, ...rest } = JSON.parse(raw);
+	return rest;
+}
+
+/** Normalize materialized package manager for fallow.mdc comparison. */
+function normalizeFallowMdc(raw) {
+	return raw
+		.trim()
+		.replace(/\b(bun|npm)\b run check:fallow/g, "{{packageManager}} run check:fallow");
+}
+
+/** Existing config files that differ from finalize templates (finalize owns these). */
+function configContentConflicts(root) {
+	/** @type {string[]} */
+	const conflicts = [];
+	for (const [template, dest] of Object.entries(CONFIG_TEMPLATE_DEST)) {
+		if (!pathExists(root, dest)) continue;
+		const existing = readFileSync(join(root, dest), "utf8");
+		try {
+			if (template === "biome.json") {
+				if (normalizeJson(existing) !== normalizeJson(loadTemplate(template))) {
+					conflicts.push(template);
+				}
+			} else if (template === ".fallowrc.json") {
+				if (
+					JSON.stringify(fallowrcBody(existing)) !==
+					JSON.stringify(fallowrcBody(loadTemplate(template)))
+				) {
+					conflicts.push(template);
+				}
+			} else if (template === "fallow.mdc") {
+				if (normalizeFallowMdc(existing) !== normalizeFallowMdc(loadTemplate(template))) {
+					conflicts.push(template);
+				}
+			}
+		} catch {
+			conflicts.push(template);
+		}
+	}
+	return conflicts;
 }
 
 /** @param {string} root @param {string[]} names @param {boolean} dryRun */
 function writeConfigTemplates(root, names, dryRun) {
 	for (const name of names) {
-		const dest = name;
+		const dest = CONFIG_TEMPLATE_DEST[name] ?? name;
 		const fullPath = join(root, dest);
 		const content = name === ".fallowrc.json" ? prepareFallowrc(root) : loadTemplate(name);
 		if (dryRun) {
@@ -327,6 +438,7 @@ function writeConfigTemplates(root, names, dryRun) {
 			}
 			continue;
 		}
+		mkdirSync(dirname(fullPath), { recursive: true });
 		writeFileSync(fullPath, content, "utf8");
 		console.log(`  wrote: ${fullPath}`);
 		if (name === ".fallowrc.json") {
@@ -335,49 +447,19 @@ function writeConfigTemplates(root, names, dryRun) {
 	}
 }
 
-function buildPipeline(runner, includeSupabase, scripts, supabaseTypesRel, communication) {
-	const loop = [];
-	if ("format" in scripts) {
-		loop.push({
-			phase: "format",
-			script: "format",
-			command: runner.run("format"),
-		});
-	}
-	if ("check:ci" in scripts) {
-		loop.push({
-			phase: "ci",
-			script: "check:ci",
-			command: runner.run("check:ci"),
-		});
-	}
-	if ("check:fallow" in scripts) {
-		loop.push({
-			phase: "fallow",
-			script: "check:fallow",
-			command: runner.run("check:fallow"),
-			innerLoop: true,
-		});
-	}
-
-	let bootstrap = null;
-	if (includeSupabase && supabaseTypesRel) {
-		bootstrap = {
-			command: supabaseBootstrapCommand(supabaseTypesRel),
-			output: supabaseTypesRel,
-			once: true,
-		};
-	}
-
+function buildPipeline(runner, includeSupabase, communication) {
+	/** @type {{
+	 *   communication: string,
+	 *   packageManager: string,
+	 *   preflight: string[],
+	 *   loop: string[]
+	 * }} */
+	// preflight[] = package.json script names run before loop[] on every /finalize (may be []).
 	return {
-		version: 1,
-		generatedAt: new Date().toISOString(),
-		packageManager: runner.name,
-		scriptsRunner: runner.name === "bun" ? "bunx" : "npx",
-		postinstallInvoker: runner.name === "bun" ? "bun" : "node",
 		communication,
-		bootstrap,
-		loop,
+		packageManager: runner.name,
+		preflight: includeSupabase ? ["supabase:types"] : [],
+		loop: [...FINALIZE_LOOP],
 	};
 }
 
@@ -394,6 +476,67 @@ function writePipeline(root, pipeline, dryRun) {
 	console.log(`  wrote: ${fullPath}`);
 }
 
+/** Resolve {{#caveman}}…{{/caveman}} / {{#brief}}…{{/brief}} blocks — keep selected mode only. */
+function resolveConditionalBlocks(content, mode) {
+	return content.replace(
+		/\{\{#(caveman|brief)\}\}([\s\S]*?)\{\{\/\1\}\}/g,
+		(_, name, body) => (name === mode ? body : ""),
+	);
+}
+
+function materializeContent(raw, runner, communication) {
+	let next = resolveConditionalBlocks(raw, communication);
+	next = next.replaceAll("{{packageManager}}", runner.name);
+	next = next.replaceAll("{{communication}}", communication);
+	return next.replace(/\n{3,}/g, "\n\n");
+}
+
+function needsMaterialize(raw) {
+	return (
+		raw.includes("{{packageManager}}") ||
+		raw.includes("{{communication}}") ||
+		raw.includes("{{#caveman}}") ||
+		raw.includes("{{#brief}}")
+	);
+}
+
+/** @param {string} filePath @param {ReturnType<typeof detectRunner>} runner @param {string} communication @param {boolean} dryRun */
+function materializeFile(filePath, runner, communication, dryRun) {
+	if (!existsSync(filePath)) return;
+	const raw = readFileSync(filePath, "utf8");
+	if (!needsMaterialize(raw)) return;
+	const next = materializeContent(raw, runner, communication);
+	if (dryRun) {
+		console.log(`  would materialize: ${filePath} (${runner.name}, ${communication})`);
+		return;
+	}
+	writeFileSync(filePath, next, "utf8");
+	console.log(`  materialized: ${filePath} (${runner.name}, ${communication})`);
+}
+
+/** Replace {{placeholders}} in SKILL.md and fallow.mdc after postinstall. */
+function materializeProject(root, runner, communication, dryRun) {
+	const skillDir = join(__dirname, "..");
+	const normalized = skillDir.replace(/\\/g, "/");
+	if (normalized.endsWith(".agents/skills/finalize")) {
+		materializeFile(join(skillDir, "SKILL.md"), runner, communication, dryRun);
+	}
+	materializeFile(join(root, FALLOW_RULE_REL), runner, communication, dryRun);
+}
+
+/** Fail fast when postinstall assets or pipeline state make a re-run impossible. */
+function guardPostinstallState(root, opts) {
+	if (!existsSync(TEMPLATE_DIR)) {
+		die(
+			"postinstall templates missing — reinstall finalize skill (skills add … --skill finalize) before re-running",
+		);
+	}
+	if (pathExists(root, PIPELINE_PATH) && !opts.force) {
+		die(
+			`${PIPELINE_PATH} already exists — postinstall is one-time; reinstall skill and use --force to replace`,
+		);
+	}
+}
 /** Remove init-only assets from the installed skill copy (scripts + templates). */
 function selfDestructSkillAssets(dryRun) {
 	const skillDir = join(__dirname, "..");
@@ -422,12 +565,10 @@ async function main() {
 
 	const root = opts.target;
 	process.chdir(root);
+	guardPostinstallState(root, opts);
 
 	console.log("finalize postinstall\n");
 	console.log(`  repo: ${root}`);
-
-	const runner = detectRunner();
-	console.log(`  runner: ${runner.name}${runner.name === "bun" ? "" : " (bun not found)"}\n`);
 
 	const { pkgPath, raw, pkg: initialPkg, indent: initialIndent } = readPackageJson(root);
 	let pkg = initialPkg;
@@ -435,8 +576,9 @@ async function main() {
 	if (!pkg.scripts) pkg.scripts = {};
 	if (!pkg.devDependencies) pkg.devDependencies = {};
 
-	const scriptDefaults = defaultScripts(runner);
-	const needScripts = missingScripts(pkg, Object.keys(scriptDefaults));
+	const runner = detectRunner(root, pkg);
+	console.log(`  runner: ${runner.name}\n`);
+
 	const needDeps = missingDevDeps(pkg);
 	const hasSupabase = hasSupabaseProject(root);
 	const hasSupabaseCli = commandExists("supabase");
@@ -473,18 +615,22 @@ async function main() {
 			includeSupabase = defaultSupabase;
 		} else {
 			startConfigure();
-			const cmd = supabaseBootstrapCommand(supabaseTypesRel);
 			const prompt = hasSupabase
-				? `? Include Supabase types step (runs \`${cmd}\` once before loop)?`
-				: `? Include Supabase types step (runs \`${cmd}\` once before loop)? (supabase/config.toml not found)`;
+				? `? Include supabase:types preflight (adds supabase:types → ${supabaseTypesRel})?`
+				: `? Include supabase:types preflight (adds supabase:types → ${supabaseTypesRel}; supabase/config.toml not found)?`;
 			includeSupabase = await ask(prompt, defaultSupabase);
 		}
 	}
 	if (includeSupabase && !hasSupabaseCli) {
-		die("Supabase bootstrap requires the supabase CLI on PATH");
+		die("supabase:types preflight requires the supabase CLI on PATH");
 	}
 
+	const scriptDefaults = defaultScripts(runner, includeSupabase, supabaseTypesRel);
+	const conflicts = scriptConflicts(pkg, scriptDefaults);
+	const scriptsToWrite = scriptsNeedingWrite(pkg, scriptDefaults);
+
 	const needConfigTemplates = missingConfigTemplates(root);
+	const configConflicts = configContentConflicts(root);
 
 	let addDeps = needDeps.length > 0;
 	if (addDeps && !opts.yes && isTTY()) {
@@ -497,14 +643,45 @@ async function main() {
 		addDeps = true;
 	}
 
-	let addScripts = needScripts.length > 0;
-	if (addScripts && !opts.yes && isTTY()) {
-		addScripts = await ask(
-			`? Add finalize scripts to package.json (${needScripts.join(", ")})?`,
+	let applyScripts = scriptsToWrite.length > 0;
+	if (conflicts.length > 0) {
+		if (opts.yes) {
+			applyScripts = true;
+		} else if (isTTY()) {
+			console.log("");
+			applyScripts = await ask(
+				`? Overwrite conflicting finalize scripts (${conflicts.join(", ")})?`,
+				true,
+			);
+		} else {
+			die(
+				`conflicting finalize scripts: ${conflicts.join(", ")} — use -y to overwrite or rename them`,
+			);
+		}
+	} else if (applyScripts && !opts.yes && isTTY()) {
+		applyScripts = await ask(
+			`? Add finalize scripts to package.json (${scriptsToWrite.join(", ")})?`,
 			true,
 		);
-	} else if (addScripts && opts.yes) {
-		addScripts = true;
+	} else if (applyScripts && opts.yes) {
+		applyScripts = true;
+	}
+
+	let overwriteConfig = configConflicts.length > 0;
+	if (configConflicts.length > 0) {
+		if (opts.yes) {
+			overwriteConfig = true;
+		} else if (isTTY()) {
+			console.log("");
+			overwriteConfig = await ask(
+				`? Overwrite conflicting finalize config (${configConflicts.join(", ")})?`,
+				true,
+			);
+		} else {
+			die(
+				`conflicting finalize config: ${configConflicts.join(", ")} — use -y to overwrite`,
+			);
+		}
 	}
 
 	let addConfigTemplates = needConfigTemplates.length > 0;
@@ -517,6 +694,32 @@ async function main() {
 		addConfigTemplates = true;
 	}
 
+	const configTemplatesToWrite = [
+		...(addConfigTemplates ? needConfigTemplates : []),
+		...(overwriteConfig ? configConflicts : []),
+	];
+
+	if (needDeps.length > 0 && !addDeps) {
+		die(
+			`missing required devDependencies: ${needDeps.join(", ")} — install them or re-run postinstall with -y`,
+		);
+	}
+	if (needConfigTemplates.length > 0 && !addConfigTemplates) {
+		die(
+			`required finalize config missing: ${needConfigTemplates.join(", ")} — add templates or re-run postinstall with -y`,
+		);
+	}
+	if (configConflicts.length > 0 && !overwriteConfig) {
+		die(
+			`conflicting finalize config: ${configConflicts.join(", ")} — overwrite or re-run postinstall with -y`,
+		);
+	}
+	if (scriptsToWrite.length > 0 && !applyScripts) {
+		die(
+			`required finalize scripts missing or declined: ${scriptsToWrite.join(", ")} — add scripts or re-run postinstall with -y`,
+		);
+	}
+
 	console.log("\nPlan:\n");
 
 	if (addDeps && needDeps.length > 0) {
@@ -526,34 +729,33 @@ async function main() {
 		}
 	}
 
-	if (addScripts && needScripts.length > 0) {
+	if (applyScripts && scriptsToWrite.length > 0) {
 		console.log("  scripts:");
-		for (const name of needScripts) {
-			console.log(`    + ${name}`);
+		for (const name of scriptsToWrite) {
+			console.log(`    ${conflicts.includes(name) ? "~" : "+"} ${name}`);
 		}
 	}
 
-	if (addConfigTemplates && needConfigTemplates.length > 0) {
+	if (configTemplatesToWrite.length > 0) {
 		console.log("  config:");
-		for (const name of needConfigTemplates) {
-			console.log(`    + ${name}`);
+		for (const name of configTemplatesToWrite) {
+			const marker = configConflicts.includes(name) ? "~" : "+";
+			console.log(`    ${marker} ${name}`);
 		}
-		if (needConfigTemplates.includes(".fallowrc.json")) {
+		if (configTemplatesToWrite.includes(".fallowrc.json")) {
 			console.log(`      entry: ${detectFallowEntries(root).join(", ")}`);
 		}
 	}
 
+	const preflightPlan = includeSupabase ? ["supabase:types"] : [];
 	console.log(
-		`  bootstrap: ${includeSupabase ? supabaseBootstrapCommand(supabaseTypesRel) : "(none)"}`,
+		`  preflight: ${preflightPlan.length ? preflightPlan.join(" → ") : "(none)"}`,
 	);
-	if (includeSupabase) {
-		console.log(`  types output: ${supabaseTypesRel}`);
-	}
 	console.log(`  communication: ${communication}`);
 	if (useCaveman) {
 		console.log(`  caveman: ${skillsInvoker(runner)} skills add ${CAVEMAN_SKILL} --skill caveman -a cursor --copy -y`);
 	}
-	console.log("  loop: format → check:ci → check:fallow\n");
+	console.log(`  loop: ${FINALIZE_LOOP.join(" → ")}\n`);
 
 	if (addDeps && needDeps.length > 0) {
 		const specs = needDeps.map((name) => `${name}@${DEV_DEPS[name]}`);
@@ -566,41 +768,38 @@ async function main() {
 		}
 	}
 
-	if (addScripts && needScripts.length > 0) {
-		for (const name of needScripts) {
+	if (applyScripts) {
+		for (const name of Object.keys(scriptDefaults)) {
 			pkg.scripts[name] = scriptDefaults[name];
 		}
 		writePackageJson(pkgPath, pkg, indent, opts.dryRun);
+	}
+
+	for (const name of Object.keys(scriptDefaults)) {
+		if (pkg.scripts[name] !== scriptDefaults[name]) {
+			die(
+				`script "${name}" does not match finalize default — overwrite declined or fix package.json`,
+			);
+		}
 	}
 
 	if (includeSupabase) {
 		ensureSupabaseTypesDir(root, supabaseTypesRel, opts.dryRun);
 	}
 
-	if (addConfigTemplates && needConfigTemplates.length > 0) {
-		writeConfigTemplates(root, needConfigTemplates, opts.dryRun);
+	if (configTemplatesToWrite.length > 0) {
+		writeConfigTemplates(root, configTemplatesToWrite, opts.dryRun);
 	}
 
-	const pipeline = buildPipeline(
-		runner,
-		includeSupabase,
-		pkg.scripts,
-		supabaseTypesRel,
-		communication,
-	);
-	if (pipeline.loop.length === 0) {
-		die("no loop steps — need format, check:ci, and/or check:fallow scripts");
-	}
-
+	const pipeline = buildPipeline(runner, includeSupabase, communication);
 	writePipeline(root, pipeline, opts.dryRun);
+	materializeProject(root, runner, communication, opts.dryRun);
 
 	if (useCaveman) {
 		console.log("");
 		const ok = installCavemanSkill(runner, opts.dryRun);
 		if (!ok && !opts.dryRun) {
-			console.warn(
-				"  caveman install failed — install manually or re-run postinstall with --no-caveman for brief mode",
-			);
+			die("caveman install failed — re-run with --no-caveman or install caveman manually");
 		}
 	}
 

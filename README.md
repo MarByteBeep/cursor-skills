@@ -27,7 +27,7 @@ Use `--copy` if Cursor does not pick up symlinked skills.
 
 | Skill | Description |
 |-------|-------------|
-| `finalize` | Quality loop: Supabase types → format → CI → Fallow until green (uses caveman mode) |
+| `finalize` | Quality loop: supabase:types preflight → format → CI → Fallow until green (uses caveman mode) |
 | `changelog` | Update `CHANGELOG.md` and `package.json` version from user-facing changes |
 
-`finalize` needs a one-time **postinstall** after add (`postinstall.mjs`); it may install the **caveman** skill in the project.
+`finalize` needs a one-time **postinstall** after add (`postinstall.mjs`); it may install the **caveman** skill in the project. Postinstall is all-or-nothing — declining required deps, scripts, or config fails before writing `pipeline.json`.

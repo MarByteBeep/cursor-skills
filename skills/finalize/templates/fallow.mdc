@@ -1,0 +1,16 @@
+---
+description: Fallow gates — fix dead code, dupes, and complexity; never suppress or relax thresholds
+alwaysApply: true
+---
+
+# Fallow quality gates
+
+When `{{packageManager}} run check:fallow` fails (dead code, duplication, or complexity):
+
+1. **Fix the code** — remove dead exports/files, extract shared helpers for clone groups, split or simplify complex functions.
+2. **Never suppress** — do not add `// fallow-ignore-next-line complexity`, `// fallow-ignore-file complexity`, `// fallow-ignore-next-line code-duplication`, or HTML equivalents unless the user explicitly approves a verified false positive.
+3. **Never relax thresholds** — do not change Fallow CLI flags (`--max-cyclomatic`, `--max-cognitive`, `duplicates.threshold`, etc.) or config to make findings pass.
+
+Fix priority when multiple categories fail: dead code → duplication → complexity.
+
+Other Fallow suppressions (e.g. verified false positives for unused exports) are out of scope here unless the user confirms them.
