@@ -16,7 +16,7 @@ The skill is **complete only when every loop command in the pipeline passes cons
 ## Load and validate pipeline (start of every /finalize)
 
 1. Read **`.cursor/finalize-pipeline.json`** at repo root.
-2. If missing → stop. Tell the user to run `scripts/init.mjs` once (see cursor-skills README).
+2. If missing → stop. Tell the user to run `scripts/init.mjs` once (see [README](README.md)).
 3. Parse JSON. If invalid → stop and report the parse error.
 4. Validate before running anything:
 
@@ -215,7 +215,7 @@ If fallow needed fixes, the winning outer pass is the **verification** run after
 ## Agent rules
 
 1. **Invoke gate** — run this skill only when the user invokes `/finalize`; never proactively.
-2. **Load and validate pipeline first** — `.cursor/finalize-pipeline.json`; stop if missing or invalid.
+2. **Load and validate pipeline first** — stop if missing or invalid.
 3. **Follow pipeline communication** — `"caveman"`: load caveman skill; `"brief"` or missing: short status updates, no caveman.
 4. **Run bootstrap once** — only if `pipeline.bootstrap` is set; max 3 attempts; never re-run inside the loop.
 5. **Run pipeline commands exactly** — bootstrap and loop `command` strings only; inspection/editing may use other tools.

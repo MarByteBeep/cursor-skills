@@ -13,7 +13,7 @@ npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor
 npx skills add MarByteBeep/cursor-skills --skill changelog -a cursor
 
 # Global (all projects)
-npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor -g
+# Don't install finalise skill globally, as it depends on the repo
 npx skills add MarByteBeep/cursor-skills --skill changelog -a cursor -g
 
 # Both at once
