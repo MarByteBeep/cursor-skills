@@ -30,7 +30,7 @@ node .agents/skills/finalize/scripts/postinstall.mjs
 Interactive prompts (like `bun init`):
 
 - Install **caveman** skill in this project for terse status updates? (default yes; no → `communication: "brief"`)
-- Include Supabase types bootstrap? (writes `src/integrations/supabase/types.ts`, or `apps/<app>/src/integrations/supabase/types.ts` in monorepos)
+- Include Supabase types bootstrap? (writes `src/integrations/supabase/types.ts`, or `apps/<app>/…` in monorepos; always asked interactively — default yes if `supabase/config.toml` exists, else no)
 - Add missing devDependencies (`@biomejs/biome`, `fallow`)?
 - Add finalize scripts (`format`, `check:ci`, `check:fallow`)?
 - Add config templates (`biome.json`, `.fallowrc.json`) if missing?

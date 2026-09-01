@@ -473,22 +473,15 @@ async function main() {
 			includeSupabase = defaultSupabase;
 		} else {
 			startConfigure();
-			if (hasSupabase) {
-				const cmd = supabaseBootstrapCommand(supabaseTypesRel);
-				includeSupabase = await ask(
-					`? Include Supabase types step (runs \`${cmd}\` once before loop)?`,
-					true,
-				);
-			} else {
-				console.log(
-					"  supabase/config.toml not found — Supabase bootstrap skipped.",
-				);
-				console.log("  Re-run postinstall with --supabase to force it.\n");
-				includeSupabase = false;
-			}
+			const cmd = supabaseBootstrapCommand(supabaseTypesRel);
+			const prompt = hasSupabase
+				? `? Include Supabase types step (runs \`${cmd}\` once before loop)?`
+				: `? Include Supabase types step (runs \`${cmd}\` once before loop)? (supabase/config.toml not found)`;
+			includeSupabase = await ask(prompt, defaultSupabase);
 		}
-	} else if (includeSupabase && !hasSupabaseCli) {
-		die("--supabase requires the supabase CLI on PATH");
+	}
+	if (includeSupabase && !hasSupabaseCli) {
+		die("Supabase bootstrap requires the supabase CLI on PATH");
 	}
 
 	const needConfigTemplates = missingConfigTemplates(root);
