@@ -29,4 +29,4 @@ Use `--copy` if Cursor does not pick up symlinked skills.
 | `finalize` | Quality loop: Supabase types → format → CI → Fallow until green (uses caveman mode) |
 | `changelog` | Update `CHANGELOG.md` and `package.json` version from user-facing changes |
 
-`finalize` expects the **caveman** skill to be installed separately (globally or in the project).
+`finalize` installs the **caveman** skill in the project when you run init (or install it yourself with project scope).

@@ -8,7 +8,7 @@
  * Options:
  *   --supabase       Include bootstrap (gen types → src/integrations/supabase/types.ts)
  *   --no-supabase    Skip bootstrap step
- *   --caveman        Install caveman skill; pipeline communication: caveman
+ *   --caveman        Install caveman skill in this project; pipeline communication: caveman
  *   --no-caveman     Skip caveman install; pipeline communication: brief
  *   -y, --yes        Non-interactive (defaults: supabase if config.toml exists; caveman on)
  *   --dry-run        Print actions without writing or installing
@@ -40,7 +40,7 @@ Usage:
 Options:
   --supabase       Include Supabase types bootstrap (writes src/integrations/supabase/types.ts)
   --no-supabase    Skip Supabase bootstrap
-  --caveman        Install caveman skill globally (communication: caveman)
+  --caveman        Install caveman skill in this project (communication: caveman)
   --no-caveman     Skip caveman; communication: brief
   -y, --yes        Skip prompts (supabase: on if supabase/config.toml exists; caveman: on)
   --dry-run        Show plan only
@@ -181,14 +181,14 @@ function skillsInvoker(runner) {
 
 function installCavemanSkill(runner, dryRun) {
 	const inv = skillsInvoker(runner);
-	const args = ["skills", "add", CAVEMAN_SKILL, "-a", "cursor", "-g", "--copy", "-y"];
+	const args = ["skills", "add", CAVEMAN_SKILL, "-a", "cursor", "--copy", "-y"];
 	const cmd = `${inv} ${args.join(" ")}`;
 	if (dryRun) {
 		console.log(`  would run: ${cmd}`);
 		return true;
 	}
 	console.log(`  $ ${cmd}`);
-	const r = spawnSync(inv, args, { stdio: "inherit" });
+	const r = spawnSync(inv, args, { stdio: "inherit", cwd: process.cwd() });
 	return r.status === 0;
 }
 
@@ -318,7 +318,7 @@ async function main() {
 	const root = opts.target;
 	process.chdir(root);
 
-	console.log("🪨 finalize init\n");
+	console.log("finalize init\n");
 	console.log(`  repo: ${root}`);
 
 	const runner = detectRunner();
@@ -431,7 +431,7 @@ async function main() {
 	}
 	console.log(`  communication: ${communication}`);
 	if (useCaveman) {
-		console.log(`  caveman: ${skillsInvoker(runner)} skills add ${CAVEMAN_SKILL} -a cursor -g --copy -y`);
+		console.log(`  caveman: ${skillsInvoker(runner)} skills add ${CAVEMAN_SKILL} -a cursor --copy -y`);
 	}
 	console.log("  loop: format → check:ci → check:fallow\n");
 

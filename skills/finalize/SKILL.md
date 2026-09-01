@@ -16,7 +16,7 @@ The skill is **complete only when every loop command in the pipeline passes cons
 ## Load and validate pipeline (start of every /finalize)
 
 1. Read **`.cursor/finalize-pipeline.json`** at repo root.
-2. If missing → stop. Tell the user to run `scripts/init.mjs` once (see [README](README.md)).
+2. If missing → stop. Tell the user to run `.agents/skills/finalize/scripts/init.mjs` once (see [README](README.md)).
 3. Parse JSON. If invalid → stop and report the parse error.
 4. Validate before running anything:
 
@@ -77,7 +77,7 @@ Read **`pipeline.communication`** from `.cursor/finalize-pipeline.json`:
 
 ### `"caveman"`
 
-**Read and follow** the **caveman** skill for the entire finalize run (globally installed or project-local).
+**Read and follow** the **caveman** skill for the entire finalize run (project-local in `.agents/skills/`).
 
 - Default intensity: **full** (user can override with `/caveman lite|full|ultra`).
 - Stay in caveman for status updates, failure analysis, and fix summaries.

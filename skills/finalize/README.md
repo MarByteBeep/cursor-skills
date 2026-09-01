@@ -12,8 +12,8 @@ Pick **one** invoker chain (do not mix):
 
 | Machine has `bun` | Install skill | Run init |
 |-------------------|---------------|----------|
-| Yes | `bunx skills add MarByteBeep/cursor-skills --skill finalize -a cursor -g --copy -y` | `bun scripts/init.mjs` |
-| No | `npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor -g --copy -y` | `node scripts/init.mjs` |
+| Yes | `bunx skills add MarByteBeep/cursor-skills --skill finalize -a cursor -g --copy -y` | `bun .agents/skills/finalize/scripts/init.mjs` |
+| No | `npx skills add MarByteBeep/cursor-skills --skill finalize -a cursor -g --copy -y` | `node .agents/skills/finalize/scripts/init.mjs` |
 
 Use `--copy` if Cursor does not pick up symlinked skills.
 
@@ -22,14 +22,14 @@ Use `--copy` if Cursor does not pick up symlinked skills.
 From the repo root:
 
 ```bash
-bun ~/.cursor/skills/finalize/scripts/init.mjs    # if bun on PATH
+bun .agents/skills/finalize/scripts/init.mjs    # if bun on PATH
 # or
-node ~/.cursor/skills/finalize/scripts/init.mjs
+node .agents/skills/finalize/scripts/init.mjs
 ```
 
 Interactive prompts (like `bun init`):
 
-- Install **caveman** skill for terse status updates? (default yes; no → `communication: "brief"`)
+- Install **caveman** skill in this project for terse status updates? (default yes; no → `communication: "brief"`)
 - Include Supabase types bootstrap? (writes `src/integrations/supabase/types.ts`, or `apps/<app>/src/integrations/supabase/types.ts` in monorepos)
 - Add missing devDependencies (`@biomejs/biome`, `fallow`)?
 - Add finalize scripts (`format`, `check:ci`, `check:fallow`)?
@@ -37,11 +37,11 @@ Interactive prompts (like `bun init`):
 Non-interactive:
 
 ```bash
-bun ~/.cursor/skills/finalize/scripts/init.mjs -y
-bun ~/.cursor/skills/finalize/scripts/init.mjs --supabase -y
-bun ~/.cursor/skills/finalize/scripts/init.mjs --no-supabase -y
-bun ~/.cursor/skills/finalize/scripts/init.mjs --no-caveman -y
-bun ~/.cursor/skills/finalize/scripts/init.mjs --dry-run
+bun .agents/skills/finalize/scripts/init.mjs -y
+bun .agents/skills/finalize/scripts/init.mjs --supabase -y
+bun .agents/skills/finalize/scripts/init.mjs --no-supabase -y
+bun .agents/skills/finalize/scripts/init.mjs --no-caveman -y
+bun .agents/skills/finalize/scripts/init.mjs --dry-run
 ```
 
 (Use `node` instead of `bun` when bun is not on PATH.)
@@ -65,7 +65,7 @@ Init writes this file. **`/finalize` reads it only** — no bun/node/npm decisio
 Re-init after changing `package.json` scripts or Supabase setup:
 
 ```bash
-<initInvoker from pipeline> ~/.cursor/skills/finalize/scripts/init.mjs
+<initInvoker from pipeline> .agents/skills/finalize/scripts/init.mjs
 ```
 
 Commit `.cursor/finalize-pipeline.json` so the team shares the same pipeline.
