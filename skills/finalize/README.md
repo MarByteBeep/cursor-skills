@@ -33,6 +33,9 @@ Interactive prompts (like `bun init`):
 - Include Supabase types bootstrap? (writes `src/integrations/supabase/types.ts`, or `apps/<app>/src/integrations/supabase/types.ts` in monorepos)
 - Add missing devDependencies (`@biomejs/biome`, `fallow`)?
 - Add finalize scripts (`format`, `check:ci`, `check:fallow`)?
+- Add config templates (`biome.json`, `.fallowrc.json`) if missing?
+
+Templates live in `skills/finalize/templates/` (sourced from [ftm-polarsteps](https://github.com/MarByteBeep/ftm-polarsteps)). Init never overwrites existing config files. Fallow `entry` paths are detected from the repo (`src/main.tsx`, `apps/*`, `packages/*`).
 
 Non-interactive:
 

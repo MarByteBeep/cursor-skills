@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const TEMPLATE_DIR = join(__dirname, "..", "templates");
 const PIPELINE_PATH = ".cursor/finalize-pipeline.json";
 /** Vite/React + Supabase template default (repo-relative). */
 const DEFAULT_SUPABASE_TYPES_REL = "src/integrations/supabase/types.ts";
@@ -181,7 +182,7 @@ function skillsInvoker(runner) {
 
 function installCavemanSkill(runner, dryRun) {
 	const inv = skillsInvoker(runner);
-	const args = ["skills", "add", CAVEMAN_SKILL, "-a", "cursor", "--copy", "-y"];
+	const args = ["skills", "add", CAVEMAN_SKILL, "--skill", "caveman", "-a", "cursor", "--copy", "-y"];
 	const cmd = `${inv} ${args.join(" ")}`;
 	if (dryRun) {
 		console.log(`  would run: ${cmd}`);
@@ -247,6 +248,82 @@ function ensureSupabaseTypesDir(root, typesRelPath, dryRun) {
 		return;
 	}
 	mkdirSync(dir, { recursive: true });
+}
+
+function loadTemplate(name) {
+	const path = join(TEMPLATE_DIR, name);
+	if (!existsSync(path)) die(`missing template: ${path}`);
+	return readFileSync(path, "utf8");
+}
+
+/** @param {string} root @param {string} rel */
+function pathExists(root, rel) {
+	return existsSync(join(root, rel));
+}
+
+/** @param {string} root @returns {string[]} */
+function detectFallowEntries(root) {
+	/** @type {string[]} */
+	const entries = [];
+	const addIfExists = (rel) => {
+		if (pathExists(root, rel) && !entries.includes(rel)) entries.push(rel);
+	};
+
+	for (const rel of ["src/main.tsx", "src/main.ts", "src/index.ts", "index.ts"]) {
+		addIfExists(rel);
+	}
+
+	for (const scope of ["apps", "packages"]) {
+		const scopeDir = join(root, scope);
+		if (!existsSync(scopeDir)) continue;
+		for (const name of readdirSync(scopeDir)) {
+			const relPaths =
+				scope === "apps"
+					? ["index.ts", "src/main.tsx", "src/main.ts", "src/index.ts"]
+					: ["src/index.ts", "index.ts"];
+			for (const sub of relPaths) {
+				addIfExists(join(scope, name, sub));
+			}
+		}
+	}
+
+	return entries.length > 0 ? entries : ["src/main.tsx"];
+}
+
+function prepareFallowrc(root) {
+	const template = JSON.parse(loadTemplate(".fallowrc.json"));
+	template.entry = detectFallowEntries(root);
+	return `${JSON.stringify(template, null, "\t")}\n`;
+}
+
+/** @returns {string[]} */
+function missingConfigTemplates(root) {
+	/** @type {string[]} */
+	const missing = [];
+	if (!pathExists(root, "biome.json")) missing.push("biome.json");
+	if (!pathExists(root, ".fallowrc.json")) missing.push(".fallowrc.json");
+	return missing;
+}
+
+/** @param {string} root @param {string[]} names @param {boolean} dryRun */
+function writeConfigTemplates(root, names, dryRun) {
+	for (const name of names) {
+		const dest = name;
+		const fullPath = join(root, dest);
+		const content = name === ".fallowrc.json" ? prepareFallowrc(root) : loadTemplate(name);
+		if (dryRun) {
+			console.log(`  would write: ${fullPath}`);
+			if (name === ".fallowrc.json") {
+				console.log(`    entry: ${detectFallowEntries(root).join(", ")}`);
+			}
+			continue;
+		}
+		writeFileSync(fullPath, content, "utf8");
+		console.log(`  wrote: ${fullPath}`);
+		if (name === ".fallowrc.json") {
+			console.log(`    entry: ${detectFallowEntries(root).join(", ")}`);
+		}
+	}
 }
 
 function buildPipeline(runner, includeSupabase, scripts, supabaseTypesRel, communication) {
@@ -386,6 +463,8 @@ async function main() {
 		die("--supabase requires the supabase CLI on PATH");
 	}
 
+	const needConfigTemplates = missingConfigTemplates(root);
+
 	let addDeps = needDeps.length > 0;
 	if (addDeps && !opts.yes && isTTY()) {
 		console.log("");
@@ -407,6 +486,16 @@ async function main() {
 		addScripts = true;
 	}
 
+	let addConfigTemplates = needConfigTemplates.length > 0;
+	if (addConfigTemplates && !opts.yes && isTTY()) {
+		addConfigTemplates = await ask(
+			`? Add config templates (${needConfigTemplates.join(", ")})?`,
+			true,
+		);
+	} else if (addConfigTemplates && opts.yes) {
+		addConfigTemplates = true;
+	}
+
 	console.log("\nPlan:\n");
 
 	if (addDeps && needDeps.length > 0) {
@@ -423,6 +512,16 @@ async function main() {
 		}
 	}
 
+	if (addConfigTemplates && needConfigTemplates.length > 0) {
+		console.log("  config:");
+		for (const name of needConfigTemplates) {
+			console.log(`    + ${name}`);
+		}
+		if (needConfigTemplates.includes(".fallowrc.json")) {
+			console.log(`      entry: ${detectFallowEntries(root).join(", ")}`);
+		}
+	}
+
 	console.log(
 		`  bootstrap: ${includeSupabase ? supabaseBootstrapCommand(supabaseTypesRel) : "(none)"}`,
 	);
@@ -431,7 +530,7 @@ async function main() {
 	}
 	console.log(`  communication: ${communication}`);
 	if (useCaveman) {
-		console.log(`  caveman: ${skillsInvoker(runner)} skills add ${CAVEMAN_SKILL} -a cursor --copy -y`);
+		console.log(`  caveman: ${skillsInvoker(runner)} skills add ${CAVEMAN_SKILL} --skill caveman -a cursor --copy -y`);
 	}
 	console.log("  loop: format → check:ci → check:fallow\n");
 
@@ -455,6 +554,10 @@ async function main() {
 
 	if (includeSupabase) {
 		ensureSupabaseTypesDir(root, supabaseTypesRel, opts.dryRun);
+	}
+
+	if (addConfigTemplates && needConfigTemplates.length > 0) {
+		writeConfigTemplates(root, needConfigTemplates, opts.dryRun);
 	}
 
 	const pipeline = buildPipeline(
